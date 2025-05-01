@@ -104,6 +104,15 @@ class FishingDB:
                 )
             ''')
             
+            # 创建补助金记录表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS subsidies (
+                    user_id TEXT,
+                    subsidy_date TEXT,
+                    PRIMARY KEY (user_id, subsidy_date)
+                )
+            ''')
+            
             # 创建钓鱼记录表
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS fishing_records (
@@ -551,4 +560,24 @@ class FishingDB:
                 SET current_bait = ?, bait_start_time = ?
                 WHERE user_id = ?
             ''', (bait_name, current_time, user_id))
+            conn.commit()
+    
+    def get_today_subsidies(self, user_id: str) -> int:
+        """获取用户今日领取补助金的次数"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM subsidies 
+                WHERE user_id = ? AND subsidy_date = date('now', 'localtime')
+            ''', (user_id,))
+            return cursor.fetchone()[0]
+    
+    def record_subsidy(self, user_id: str) -> None:
+        """记录用户领取补助金"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO subsidies (user_id, subsidy_date)
+                VALUES (?, date('now', 'localtime'))
+            ''', (user_id,))
             conn.commit()

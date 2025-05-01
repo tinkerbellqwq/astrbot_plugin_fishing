@@ -7,12 +7,14 @@ from .db import FishingDB
 from .constants import *
 from .fish import Fish
 from .stats import FisherStats, BestCatch
+from .lottery import FishingLottery
 
 class FishingSystem:
     def __init__(self, config: Dict, get_nickname_func):
         self.config = config
         self.db = FishingDB(config['database'])
         self.get_nickname = get_nickname_func
+        self.lottery = FishingLottery(self.db)
         self.LOG = logging.getLogger("Fishing")
         self.current_weather = None
         self.last_weather_update = 0
@@ -38,7 +40,7 @@ class FishingSystem:
         # 初始化鱼类数据库
         if config.get('initialize_fish_types', True):
             self.LOG.info("初始化鱼类数据库...")
-            self.db.initialize_fish_types()
+            self._initialize_fish_types()
     
     def update_weather(self) -> None:
         """更新天气"""
@@ -186,6 +188,11 @@ class FishingSystem:
             return 0.0
         
         return BAIT_DATA[bait_name]['effect']
+
+    def set_user_coins(self, user_id: str, coins: int) -> str:
+        """设置用户金币"""
+        self.db.update_user_coins(user_id, coins)
+        return f"✅ v给用户 {user_id} 的金币为 {coins}"
 
     def get_random_fish(self) -> Dict:
         """获取随机鱼"""
@@ -470,6 +477,57 @@ class FishingSystem:
         
         return "\n".join(result)
 
+    def sell_by_rarity(self, user_id: str, rarity: int) -> str:
+        """按稀有度等级卖出鱼"""
+        # 获取用户所有鱼
+        fish_list = self.db.get_user_fish(user_id)
+        
+        if not fish_list:
+            return "🌊 你的鱼塘空空如也，没有可卖出的鱼"
+        
+        # 过滤出指定稀有度的鱼
+        target_fish = [fish for fish in fish_list if fish['rarity'] == rarity]
+        
+        if not target_fish:
+            rarity_names = {1: "垃圾", 2: "普通", 3: "稀有", 4: "史诗", 5: "传说"}
+            return f"❌ 没有{rarity_names.get(rarity, '未知')}品质的鱼可卖出"
+        
+        total_sold = 0
+        total_value = 0
+        sold_fish = []
+        
+        for fish in target_fish:
+            # 跳过锁定的鱼
+            if fish.get('lock_time', 0) > 0:
+                continue
+                
+            fish_id = fish['id']
+            quantity = fish['quantity']
+            name = fish['name']
+            value = fish['base_value'] * quantity
+            
+            # 从鱼塘中移除并增加金币
+            self.db.remove_fish_from_pond(user_id, fish_id, quantity)
+            self.db.update_user_coins(user_id, value)
+            
+            total_sold += quantity
+            total_value += value
+            sold_fish.append(f"• {name} x{quantity} ({value}金币)")
+        
+        if total_sold == 0:
+            rarity_names = {1: "垃圾", 2: "普通", 3: "稀有", 4: "史诗", 5: "传说"}
+            return f"❌ 所有{rarity_names.get(rarity, '未知')}品质的鱼都处于禁售期"
+        
+        user_coins = self.db.get_user_coins(user_id)
+        rarity_names = {1: "垃圾", 2: "普通", 3: "稀有", 4: "史诗", 5: "传说"}
+        
+        result = [f"💰 成功出售 {total_sold}条{rarity_names.get(rarity, '未知')}品质的鱼，获得{total_value}金币"]
+        result.append(f"💰 当前金币: {user_coins}")
+        result.append("\n出售明细:")
+        result.extend(sold_fish)
+        
+        return "\n".join(result)
+
     def toggle_auto_fishing(self, user_id: str) -> str:
         """开启/关闭自动钓鱼"""
         if not self.auto_fishing_enabled:
@@ -559,7 +617,33 @@ class FishingSystem:
             5: "【SSR】⭐⭐⭐⭐⭐"
         }
         return displays.get(rarity, f"【?】{'⭐' * rarity}")
+
+
+    def get_subsidy(self, user_id: str) -> str:
+        """领取补助金"""
+        # 检查用户当前金币
+        current_coins = self.db.get_user_coins(user_id)
+        if current_coins >= 50:
+            return "❌ 您的金币已经超过50，无法领取补助金"
         
+        # 检查今日领取次数
+        today_subsidies = self.db.get_today_subsidies(user_id)
+        if today_subsidies >= 3:
+            return "❌ 今日补助金领取次数已达上限（3次）"
+        
+        # 发放补助金（200金币）
+        subsidy_amount = 200
+        self.db.update_user_coins(user_id, subsidy_amount)
+        self.db.record_subsidy(user_id)
+        
+        # 获取更新后的金币数
+        new_coins = self.db.get_user_coins(user_id)
+        
+        return f"""✨ 补助金领取成功！
+获得金币：{subsidy_amount}
+当前金币：{new_coins}
+今日剩余领取次数：{2 - today_subsidies}"""
+
     def _weighted_choice(self, choices):
         """基于权重的随机选择"""
         # choices是一个(选项, 权重)的列表
@@ -572,3 +656,7 @@ class FishingSystem:
             upto += weight
         # 如果循环结束还没返回（不应该发生），返回最后一项
         return choices[-1][0]
+
+    def _initialize_fish_types(self):
+        """初始化鱼类数据库"""
+        self.db.initialize_fish_types()
