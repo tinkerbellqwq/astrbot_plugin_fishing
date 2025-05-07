@@ -901,7 +901,7 @@ class FishingDB:
         """获取所有成就"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT achievement_id, name, description FROM achievements")
+            cursor.execute("SELECT * FROM achievements")
             return [dict(row) for row in cursor.fetchall()]
 
     def get_user_titles(self, user_id: str) -> List[Dict]:
@@ -2271,7 +2271,7 @@ class FishingDB:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT OR IGNORE INTO user_titles (user_id, title_id, granted_at)
+                    INSERT OR IGNORE INTO user_titles (user_id, title_id, unlocked_at)
                     VALUES (?, ?, datetime('now'))
                 """, (user_id, title_id))
                 conn.commit()

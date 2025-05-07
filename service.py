@@ -452,7 +452,57 @@ class FishingService:
         if error:
             return error
             
-        achievements = self.db.get_user_achievements(user_id)
+        # 获取所有成就
+        all_achievements = self.db.get_all_achievements()
+        
+        # 获取用户成就进度
+        progress_records = self.db.get_user_achievement_progress(user_id)
+        progress_map = {record['achievement_id']: record for record in progress_records}
+        
+        # 获取用户统计数据
+        stats = self.db.get_user_fishing_stats(user_id)
+        
+        # 处理每个成就
+        achievements = []
+        for achievement in all_achievements:
+            achievement_id = achievement['achievement_id']
+            progress_record = progress_map.get(achievement_id, {
+                'current_progress': 0,
+                'completed_at': None,
+                'claimed_at': None
+            })
+            
+            # 计算当前进度
+            current_progress = progress_record['current_progress']
+            if current_progress == 0:  # 如果进度为0，重新计算
+                if achievement['target_type'] == 'total_fish_count':
+                    current_progress = stats.get('total_count', 0)
+                elif achievement['target_type'] == 'total_coins_earned':
+                    current_progress = stats.get('total_value', 0)
+                elif achievement['target_type'] == 'total_weight_caught':
+                    current_progress = stats.get('total_weight', 0)
+                elif achievement['target_type'] == 'specific_fish_count':
+                    if achievement['target_fish_id'] is None:
+                        current_progress = self.db.get_user_unique_fish_count(user_id)
+                    else:
+                        current_progress = self.db.get_user_specific_fish_count(user_id, achievement['target_fish_id'])
+                
+                # 更新进度
+                self.db.update_user_achievement_progress(
+                    user_id, 
+                    achievement_id, 
+                    current_progress,
+                    current_progress >= achievement['target_value']
+                )
+            
+            achievements.append({
+                **achievement,
+                'is_completed': progress_record['completed_at'] is not None,
+                'is_claimed': progress_record['claimed_at'] is not None,
+                'progress': current_progress,
+                'target_value': achievement['target_value']
+            })
+        
         return {"success": True, "achievements": achievements}
 
     def get_all_baits(self) -> Dict:
@@ -1251,8 +1301,8 @@ class FishingService:
 
     def _check_user_achievements(self, user_id: str):
         """检查单个用户的成就完成情况"""
-        # 获取用户所有未完成的成就
-        achievements = self.db.get_user_uncompleted_achievements(user_id)
+        # 获取所有成就
+        achievements = self.db.get_all_achievements()
         
         for achievement in achievements:
             try:
@@ -1264,7 +1314,12 @@ class FishingService:
                     self._grant_achievement_reward(user_id, achievement)
                     
                     # 记录成就完成
-                    self.db.record_achievement_completion(user_id, achievement['achievement_id'])
+                    self.db.update_user_achievement_progress(
+                        user_id,
+                        achievement['achievement_id'],
+                        achievement['target_value'],
+                        True
+                    )
                     
                     # 记录日志
                     self.LOG.info(f"用户 {user_id} 完成成就: {achievement['name']}")
@@ -1281,6 +1336,18 @@ class FishingService:
         # 获取用户统计数据
         stats = self.db.get_user_fishing_stats(user_id)
         
+        # 获取当前进度
+        progress_records = self.db.get_user_achievement_progress(user_id)
+        progress_record = next(
+            (record for record in progress_records if record['achievement_id'] == achievement['achievement_id']),
+            {'current_progress': 0}
+        )
+        current_progress = progress_record['current_progress']
+        
+        # 如果已经完成，直接返回
+        if progress_record.get('completed_at') is not None:
+            return False
+        
         # 根据不同的目标类型检查完成情况
         if target_type == 'total_fish_count':
             return stats.get('total_count', 0) >= target_value
@@ -1295,9 +1362,18 @@ class FishingService:
                 garbage_count = self.db.get_user_garbage_count(user_id)
                 return garbage_count >= target_value
             elif target_fish_id == -4:
-                # 检查深海鱼种类数量
-                deep_sea_fish_count = self.db.get_user_deep_sea_fish_count(user_id)
-                return deep_sea_fish_count >= target_value
+                # 检查深海鱼种类数量（重量大于3000的鱼）
+                with self.db._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT f.fish_id) as deep_sea_count
+                        FROM fishing_records fr
+                        JOIN fish f ON fr.fish_id = f.fish_id
+                        WHERE fr.user_id = ? AND f.max_weight > 3000
+                    """, (user_id,))
+                    result = cursor.fetchone()
+                    deep_sea_count = result['deep_sea_count'] if result else 0
+                    return deep_sea_count >= target_value
             elif target_fish_id == -5:
                 # 检查是否钓到过重量超过100kg的鱼
                 return self.db.has_caught_heavy_fish(user_id, 100000)  # 100kg = 100000g
@@ -1349,3 +1425,16 @@ class FishingService:
             
         elif reward_type == 'bait':
             self.db.add_bait_to_inventory(user_id, reward_value, reward_quantity)
+
+    def get_user_deep_sea_fish_count(self, user_id: str) -> int:
+        """获取用户钓到的深海鱼种类数量（重量大于3000的鱼）"""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(DISTINCT f.fish_id) as deep_sea_count
+                FROM fishing_records fr
+                JOIN fish f ON fr.fish_id = f.fish_id
+                WHERE fr.user_id = ? AND f.max_weight > 3000
+            """, (user_id,))
+            result = cursor.fetchone()
+            return result['deep_sea_count'] if result else 0

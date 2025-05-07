@@ -949,6 +949,7 @@ class FishingPlugin(Star):
      - /查看成就: 查看可达成的成就
      - /钓鱼记录: 查看最近的钓鱼记录
     """
+        message = prefix + "\n" + message
         if isinstance(event, AiocqhttpMessageEvent):
             # 如果是AiocqhttpMessageEvent，使用get_Node函数
             yield event.chain_result([get_Node(event.get_sender_id(), "钓鱼帮助", message)])
