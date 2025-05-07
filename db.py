@@ -2116,3 +2116,173 @@ class FishingDB:
         except sqlite3.Error as e:
             logger.error(f"获取钓鱼记录失败: {e}")
             return []
+
+    def get_user_deep_sea_fish_count(self, user_id: str) -> int:
+        """获取用户钓到的深海鱼种类数量"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(DISTINCT f.fish_id)
+                FROM user_fish_inventory ufi
+                JOIN fish f ON ufi.fish_id = f.fish_id
+                WHERE ufi.user_id = ? AND f.is_deep_sea = 1
+            """, (user_id,))
+            return cursor.fetchone()[0] or 0
+
+    def get_user_garbage_count(self, user_id: str) -> int:
+        """获取用户钓到的垃圾物品数量"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM user_fish_inventory ufi
+                JOIN fish f ON ufi.fish_id = f.fish_id
+                WHERE ufi.user_id = ? AND f.rarity = 1 AND f.base_value <= 2
+            """, (user_id,))
+            return cursor.fetchone()[0] or 0
+
+    def get_user_unique_fish_count(self, user_id: str) -> int:
+        """获取用户钓到的不同种类鱼的数量"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(DISTINCT fish_id)
+                FROM user_fish_inventory
+                WHERE user_id = ?
+            """, (user_id,))
+            return cursor.fetchone()[0] or 0
+
+    def get_user_specific_fish_count(self, user_id: str, fish_id: int) -> int:
+        """获取用户钓到的特定鱼的数量"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM user_fish_inventory
+                WHERE user_id = ? AND fish_id = ?
+            """, (user_id, fish_id))
+            return cursor.fetchone()[0] or 0
+
+    def has_caught_heavy_fish(self, user_id: str, min_weight: int) -> bool:
+        """检查用户是否钓到过重量超过指定值的鱼"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM fishing_records
+                WHERE user_id = ? AND weight >= ?
+                LIMIT 1
+            """, (user_id, min_weight))
+            return cursor.fetchone() is not None
+
+    def has_performed_wipe_bomb(self, user_id: str) -> bool:
+        """检查用户是否进行过擦弹"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM wipe_bomb_log
+                WHERE user_id = ?
+                LIMIT 1
+            """, (user_id,))
+            return cursor.fetchone() is not None
+
+    def has_wipe_bomb_multiplier(self, user_id: str, multiplier: float) -> bool:
+        """检查用户是否在擦弹中获得过指定倍数的奖励"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM wipe_bomb_log
+                WHERE user_id = ? AND reward_multiplier >= ?
+                LIMIT 1
+            """, (user_id, multiplier))
+            return cursor.fetchone() is not None
+
+    def has_wipe_bomb_profit(self, user_id: str, min_profit: int) -> bool:
+        """检查用户是否在擦弹中获得过指定金额的盈利"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM wipe_bomb_log
+                WHERE user_id = ? AND (reward_amount - contribution_amount) >= ?
+                LIMIT 1
+            """, (user_id, min_profit))
+            return cursor.fetchone() is not None
+
+    def has_rod_of_rarity(self, user_id: str, rarity: int) -> bool:
+        """检查用户是否拥有指定稀有度的鱼竿"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM user_rods ur
+                JOIN rods r ON ur.rod_id = r.rod_id
+                WHERE ur.user_id = ? AND r.rarity = ?
+                LIMIT 1
+            """, (user_id, rarity))
+            return cursor.fetchone() is not None
+
+    def has_accessory_of_rarity(self, user_id: str, rarity: int) -> bool:
+        """检查用户是否拥有指定稀有度的饰品"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1
+                FROM user_accessories ua
+                JOIN accessories a ON ua.accessory_id = a.accessory_id
+                WHERE ua.user_id = ? AND a.rarity = ?
+                LIMIT 1
+            """, (user_id, rarity))
+            return cursor.fetchone() is not None
+
+    def get_user_uncompleted_achievements(self, user_id: str) -> List[Dict]:
+        """获取用户未完成的成就列表"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.*
+                FROM achievements a
+                LEFT JOIN user_achievements ua ON a.achievement_id = ua.achievement_id AND ua.user_id = ?
+                WHERE ua.achievement_id IS NULL
+                ORDER BY a.achievement_id
+            """, (user_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def record_achievement_completion(self, user_id: str, achievement_id: int) -> bool:
+        """记录用户完成成就"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO user_achievements (user_id, achievement_id, completed_at)
+                    VALUES (?, ?, datetime('now'))
+                """, (user_id, achievement_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"记录成就完成失败: {e}")
+            return False
+
+    def grant_title_to_user(self, user_id: str, title_id: int) -> bool:
+        """授予用户称号"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR IGNORE INTO user_titles (user_id, title_id, granted_at)
+                    VALUES (?, ?, datetime('now'))
+                """, (user_id, title_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"授予称号失败: {e}")
+            return False
+
+    def get_all_users(self) -> List[str]:
+        """获取所有注册用户的ID列表"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id FROM users")
+            return [row[0] for row in cursor.fetchall()]

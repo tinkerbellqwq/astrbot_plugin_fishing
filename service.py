@@ -12,6 +12,8 @@ class FishingService:
         self.db = FishingDB(db_path)
         self.auto_fishing_thread = None
         self.auto_fishing_running = False
+        self.achievement_check_thread = None
+        self.achievement_check_running = False
         
         # 设置日志记录器
         self.LOG = logger
@@ -21,6 +23,9 @@ class FishingService:
         
         # 启动自动钓鱼
         self.start_auto_fishing_task()
+        
+        # 启动成就检查
+        self.start_achievement_check_task()
         
     def _ensure_shop_items_exist(self):
         """确保商店中有基本物品数据"""
@@ -1202,3 +1207,145 @@ class FishingService:
             "records": records,
             "count": len(records)
         }
+
+    def start_achievement_check_task(self):
+        """启动成就检查任务"""
+        if self.achievement_check_thread and self.achievement_check_thread.is_alive():
+            self.LOG.info("成就检查线程已在运行中")
+            return
+            
+        self.achievement_check_running = True
+        self.achievement_check_thread = threading.Thread(target=self._achievement_check_loop, daemon=True)
+        self.achievement_check_thread.start()
+        self.LOG.info("成就检查线程已启动")
+        
+    def stop_achievement_check_task(self):
+        """停止成就检查任务"""
+        self.achievement_check_running = False
+        if self.achievement_check_thread:
+            self.achievement_check_thread.join(timeout=1.0)
+            self.LOG.info("成就检查线程已停止")
+
+    def _achievement_check_loop(self):
+        """成就检查循环任务"""
+        while self.achievement_check_running:
+            try:
+                # 获取所有注册用户
+                users = self.db.get_all_users()
+                
+                if users:
+                    self.LOG.info(f"执行成就检查任务，{len(users)}个用户")
+                    
+                    for user_id in users:
+                        try:
+                            self._check_user_achievements(user_id)
+                        except Exception as e:
+                            self.LOG.error(f"用户 {user_id} 成就检查出错: {e}")
+                
+                # 每10分钟检查一次
+                time.sleep(600)
+                
+            except Exception as e:
+                self.LOG.error(f"成就检查任务出错: {e}", exc_info=True)
+                time.sleep(60)  # 出错后等待1分钟再重试
+
+    def _check_user_achievements(self, user_id: str):
+        """检查单个用户的成就完成情况"""
+        # 获取用户所有未完成的成就
+        achievements = self.db.get_user_uncompleted_achievements(user_id)
+        
+        for achievement in achievements:
+            try:
+                # 检查成就是否完成
+                is_completed = self._check_achievement_completion(user_id, achievement)
+                
+                if is_completed:
+                    # 发放奖励
+                    self._grant_achievement_reward(user_id, achievement)
+                    
+                    # 记录成就完成
+                    self.db.record_achievement_completion(user_id, achievement['achievement_id'])
+                    
+                    # 记录日志
+                    self.LOG.info(f"用户 {user_id} 完成成就: {achievement['name']}")
+                    
+            except Exception as e:
+                self.LOG.error(f"检查成就 {achievement['name']} 时出错: {e}")
+
+    def _check_achievement_completion(self, user_id: str, achievement: Dict) -> bool:
+        """检查特定成就是否完成"""
+        target_type = achievement['target_type']
+        target_value = achievement['target_value']
+        target_fish_id = achievement['target_fish_id']
+        
+        # 获取用户统计数据
+        stats = self.db.get_user_fishing_stats(user_id)
+        
+        # 根据不同的目标类型检查完成情况
+        if target_type == 'total_fish_count':
+            return stats.get('total_count', 0) >= target_value
+            
+        elif target_type == 'specific_fish_count':
+            if target_fish_id is None:
+                # 检查不同种类鱼的数量
+                unique_fish_count = self.db.get_user_unique_fish_count(user_id)
+                return unique_fish_count >= target_value
+            elif target_fish_id == -3:
+                # 检查垃圾物品数量
+                garbage_count = self.db.get_user_garbage_count(user_id)
+                return garbage_count >= target_value
+            elif target_fish_id == -4:
+                # 检查深海鱼种类数量
+                deep_sea_fish_count = self.db.get_user_deep_sea_fish_count(user_id)
+                return deep_sea_fish_count >= target_value
+            elif target_fish_id == -5:
+                # 检查是否钓到过重量超过100kg的鱼
+                return self.db.has_caught_heavy_fish(user_id, 100000)  # 100kg = 100000g
+            else:
+                # 检查特定鱼的捕获数量
+                if target_fish_id in [-1, -2]:
+                    return False
+                specific_fish_count = self.db.get_user_specific_fish_count(user_id, target_fish_id)
+                return specific_fish_count >= target_value
+                
+        elif target_type == 'total_coins_earned':
+            return stats.get('total_value', 0) >= target_value
+            
+        elif target_type == 'total_weight_caught':
+            return stats.get('total_weight', 0) >= target_value
+            
+        elif target_type == 'wipe_bomb_profit':
+            if target_value == 1:  # 第一次擦弹
+                return self.db.has_performed_wipe_bomb(user_id)
+            elif target_value == 10:  # 10倍奖励
+                return self.db.has_wipe_bomb_multiplier(user_id, 10)
+            else:  # 特定盈利金额
+                return self.db.has_wipe_bomb_profit(user_id, target_value)
+                
+        elif target_type == 'rod_collection':
+            # 检查是否有特定稀有度的鱼竿
+            return self.db.has_rod_of_rarity(user_id, target_value)
+            
+        elif target_type == 'accessory_collection':
+            # 检查是否有特定稀有度的饰品
+            return self.db.has_accessory_of_rarity(user_id, target_value)
+            
+        return False
+
+    def _grant_achievement_reward(self, user_id: str, achievement: Dict):
+        """发放成就奖励"""
+        reward_type = achievement['reward_type']
+        reward_value = achievement['reward_value']
+        reward_quantity = achievement['reward_quantity']
+        
+        if reward_type == 'coins':
+            self.db.update_user_coins(user_id, reward_value * reward_quantity)
+            
+        elif reward_type == 'premium_currency':
+            self.db.update_user_currency(user_id, 0, reward_value * reward_quantity)
+            
+        elif reward_type == 'title':
+            self.db.grant_title_to_user(user_id, reward_value)
+            
+        elif reward_type == 'bait':
+            self.db.add_bait_to_inventory(user_id, reward_value, reward_quantity)
