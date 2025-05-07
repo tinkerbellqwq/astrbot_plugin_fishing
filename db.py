@@ -1085,7 +1085,9 @@ class FishingDB:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT a.accessory_id, a.name, a.description, ua.is_equipped
+                SELECT ua.accessory_instance_id, a.accessory_id, a.name, a.description, a.rarity,
+                       a.bonus_fish_quality_modifier, a.bonus_fish_quantity_modifier,
+                       a.bonus_rare_fish_chance, a.other_bonus_description, ua.is_equipped
                 FROM user_accessories ua
                 JOIN accessories a ON ua.accessory_id = a.accessory_id
                 WHERE ua.user_id = ?

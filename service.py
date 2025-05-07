@@ -832,18 +832,19 @@ class FishingService:
         
         # 执行抽奖
         result = self._perform_single_gacha(user_id, pool_id)
-        if not result:
+        if not result.get('success'):
             return {"success": False, "message": "抽奖失败，请稍后再试"}
             
         # 将物品信息添加到rewards_by_rarity中，便于前端显示
         rewards_by_rarity = {}
-        rarity = result.get('rarity', 1)
-        rewards_by_rarity[rarity] = [result]
+        item = result.get('item', {})
+        rarity = item.get('rarity', 1)
+        rewards_by_rarity[rarity] = [item]
             
         return {
             "success": True,
-            "message": f"恭喜获得: {result['name']}",
-            "item": result,
+            "message": f"恭喜获得: {item.get('name', '未知物品')}",
+            "item": item,
             "rewards_by_rarity": rewards_by_rarity
         }
 

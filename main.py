@@ -854,7 +854,7 @@ class FishingPlugin(Star):
         """显示钓鱼排行榜"""
         try:
             # 查询排行榜数据
-            top_users = self.FishingService.db.get_leaderboard(limit=10)
+            top_users = self.FishingService.db.get_leaderboard(limit=1000)  # 获取更多用户数据以进行不同排序
 
             if not top_users:
                 yield event.plain_result("📊 暂无排行榜数据，快去争当第一名吧！")
@@ -862,22 +862,24 @@ class FishingPlugin(Star):
 
             message = "【🏆 钓鱼排行榜 - TOP 10】\n\n"
 
-            # 显示金币排行
+            # 金币富豪榜 - 按金币数量排序
             message += "💰 金币富豪榜 💰\n"
-            for idx, user in enumerate(sorted(top_users, key=lambda x: x.get('coins', 0), reverse=True)[:10], 1):
-                # 添加排名表情
+            coins_ranking = sorted(top_users, key=lambda x: x.get('coins', 0), reverse=True)[:10]
+            for idx, user in enumerate(coins_ranking, 1):
                 rank_emoji = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
                 message += f"{rank_emoji} {user.get('nickname', '未知用户')} - {user.get('coins', 0)}金币\n"
 
+            # 钓鱼大师榜 - 按钓鱼次数排序
             message += "\n🎣 钓鱼大师榜 🎣\n"
-            for idx, user in enumerate(
-                    sorted(top_users, key=lambda x: x.get('total_fishing_count', 0), reverse=True)[:10], 1):
+            fishing_ranking = sorted(top_users, key=lambda x: x.get('total_fishing_count', 0), reverse=True)[:10]
+            for idx, user in enumerate(fishing_ranking, 1):
                 rank_emoji = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
                 message += f"{rank_emoji} {user.get('nickname', '未知用户')} - {user.get('total_fishing_count', 0)}条鱼\n"
 
+            # 总重量榜 - 按总重量排序
             message += "\n⚖️ 总重量榜 ⚖️\n"
-            for idx, user in enumerate(
-                    sorted(top_users, key=lambda x: x.get('total_weight_caught', 0), reverse=True)[:10], 1):
+            weight_ranking = sorted(top_users, key=lambda x: x.get('total_weight_caught', 0), reverse=True)[:10]
+            for idx, user in enumerate(weight_ranking, 1):
                 rank_emoji = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
                 message += f"{rank_emoji} {user.get('nickname', '未知用户')} - {user.get('total_weight_caught', 0)}g\n"
 
@@ -1541,11 +1543,11 @@ class FishingPlugin(Star):
         # 获取用户饰品
         accessories = self.FishingService.get_user_accessories(user_id)
 
-        if not accessories.get("success"):
-            yield event.plain_result(accessories.get("message", "获取饰品失败！"))
+        if not accessories["success"]:
+            yield event.plain_result(accessories["message"])
             return
 
-        user_accessories = accessories.get("accessories", [])
+        user_accessories = accessories["accessories"]
 
         if not user_accessories:
             yield event.plain_result("🎭 你没有任何饰品，可以通过抽卡获得！")
@@ -1553,32 +1555,32 @@ class FishingPlugin(Star):
 
         # 获取当前装备的饰品
         equipped = self.FishingService.get_user_equipped_accessory(user_id)
-        equipped_id = equipped.get("accessory", {}).get("accessory_instance_id") if equipped.get("success") else None
+        equipped_id = equipped["accessory"]["accessory_instance_id"] if equipped["accessory"] else None
 
         # 构建消息
         message = "【🎭 饰品背包】\n\n"
 
         for accessory in user_accessories:
-            accessory_instance_id = accessory.get("accessory_instance_id")
+            accessory_instance_id = accessory["accessory_instance_id"]
             is_equipped = accessory_instance_id == equipped_id
 
-            message += f"ID:{accessory_instance_id} - {accessory.get('name')} (稀有度:{'★' * accessory.get('rarity', 1)})"
+            message += f"ID:{accessory_instance_id} - {accessory['name']} (稀有度:{'★' * accessory['rarity']})"
             if is_equipped:
                 message += " [已装备]"
             message += "\n"
 
-            if accessory.get("description"):
-                message += f"  📝 描述: {accessory.get('description')}\n"
+            if accessory["description"]:
+                message += f"  📝 描述: {accessory['description']}\n"
 
             # 显示属性加成
-            if accessory.get("bonus_fish_quality_modifier", 1.0) != 1.0:
-                message += f"  ✨ 品质加成: +{(accessory.get('bonus_fish_quality_modifier', 1.0) - 1) * 100:.0f}%\n"
-            if accessory.get("bonus_fish_quantity_modifier", 1.0) != 1.0:
-                message += f"  📊 数量加成: +{(accessory.get('bonus_fish_quantity_modifier', 1.0) - 1) * 100:.0f}%\n"
-            if accessory.get("bonus_rare_fish_chance", 0.0) > 0:
-                message += f"  🌟 稀有度加成: +{accessory.get('bonus_rare_fish_chance', 0.0) * 100:.0f}%\n"
-            if accessory.get("other_bonus_description"):
-                message += f"  🔮 特殊效果: {accessory.get('other_bonus_description')}\n"
+            if accessory["bonus_fish_quality_modifier"] != 1.0:
+                message += f"  ✨ 品质加成: +{(accessory['bonus_fish_quality_modifier'] - 1) * 100:.0f}%\n"
+            if accessory["bonus_fish_quantity_modifier"] != 1.0:
+                message += f"  📊 数量加成: +{(accessory['bonus_fish_quantity_modifier'] - 1) * 100:.0f}%\n"
+            if accessory["bonus_rare_fish_chance"] > 0:
+                message += f"  🌟 稀有度加成: +{accessory['bonus_rare_fish_chance'] * 100:.0f}%\n"
+            if accessory["other_bonus_description"]:
+                message += f"  🔮 特殊效果: {accessory['other_bonus_description']}\n"
 
         message += "\n💡 使用「使用饰品 ID」命令装备饰品"
 
@@ -1617,6 +1619,50 @@ class FishingPlugin(Star):
             yield event.plain_result(message)
         except ValueError:
             yield event.plain_result("⚠️ 请输入有效的饰品ID")
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("增加金币", alias={"addcoins"})
+    async def add_coins(self, event: AstrMessageEvent):
+        """给指定用户增加金币（管理员命令）"""
+        args = event.message_str.split(' ')
+        
+        if len(args) < 3:
+            yield event.plain_result("⚠️ 请使用正确的格式：增加金币 <用户ID> <金币数量>")
+            return
+            
+        try:
+            user_id = args[1]
+            amount = int(args[2])
+            
+            if amount <= 0:
+                yield event.plain_result("⚠️ 金币数量必须大于0")
+                return
+                
+            # 检查用户是否存在
+            if not self.FishingService.is_registered(user_id):
+                yield event.plain_result("❌ 该用户未注册")
+                return
+                
+            # 增加金币
+            result = self.FishingService.db.update_user_coins(user_id, amount)
+            
+            if result:
+                # 获取用户当前金币数
+                user_currency = self.FishingService.db.get_user_currency(user_id)
+                current_coins = user_currency.get('coins', 0)
+                
+                message = f"✅ 成功为用户 {user_id} 增加 {amount} 金币\n"
+                message += f"💰 当前金币数：{current_coins}"
+            else:
+                message = "❌ 增加金币失败，请稍后重试"
+                
+            yield event.plain_result(message)
+            
+        except ValueError:
+            yield event.plain_result("⚠️ 请输入有效的金币数量")
+        except Exception as e:
+            logger.error(f"增加金币时出错: {e}")
+            yield event.plain_result(f"❌ 操作失败：{str(e)}")
 
     async def terminate(self):
         """插件被卸载/停用时调用"""
