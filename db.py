@@ -169,6 +169,23 @@ class FishingDB:
                     )
                 ''')
 
+                # 添加抽卡记录表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS gacha_records (
+                        record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        gacha_pool_id INTEGER NOT NULL,
+                        item_type TEXT NOT NULL CHECK (item_type IN ('rod', 'accessory', 'bait', 'fish', 'coins', 'premium_currency')),
+                        item_id INTEGER NOT NULL,
+                        item_name TEXT NOT NULL,
+                        quantity INTEGER DEFAULT 1,
+                        rarity INTEGER DEFAULT 1,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                        FOREIGN KEY (gacha_pool_id) REFERENCES gacha_pools(gacha_pool_id) ON DELETE CASCADE
+                    )
+                ''')
+
                 # User Data Tables
                 cursor.execute(f'''
                                 CREATE TABLE IF NOT EXISTS users (
@@ -2286,3 +2303,62 @@ class FishingDB:
             cursor = conn.cursor()
             cursor.execute("SELECT user_id FROM users")
             return [row[0] for row in cursor.fetchall()]
+
+    def record_gacha_result(self, user_id: str, gacha_pool_id: int, item_type: str, 
+                          item_id: int, item_name: str, quantity: int = 1, 
+                          rarity: int = 1) -> bool:
+        """
+        记录用户的抽卡结果
+        
+        Args:
+            user_id: 用户ID
+            gacha_pool_id: 抽卡池ID
+            item_type: 物品类型
+            item_id: 物品ID
+            item_name: 物品名称
+            quantity: 物品数量
+            rarity: 物品稀有度
+            
+        Returns:
+            bool: 是否成功记录
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO gacha_records (
+                        user_id, gacha_pool_id, item_type, item_id, 
+                        item_name, quantity, rarity
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, gacha_pool_id, item_type, item_id, 
+                     item_name, quantity, rarity))
+                conn.commit()
+                return True
+        except sqlite3.Error as e:
+            logger.error(f"记录抽卡结果失败: {e}")
+            return False
+
+    def get_user_gacha_records(self, user_id: str, limit: int = 10) -> List[Dict]:
+        """
+        获取用户的抽卡记录
+        
+        Args:
+            user_id: 用户ID
+            limit: 返回记录数量限制
+            
+        Returns:
+            List[Dict]: 抽卡记录列表
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM gacha_records 
+                    WHERE user_id = ? 
+                    ORDER BY timestamp DESC 
+                    LIMIT ?
+                """, (user_id, limit))
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logger.error(f"获取抽卡记录失败: {e}")
+            return []

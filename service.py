@@ -671,116 +671,144 @@ class FishingService:
         }
         
     def multi_gacha(self, user_id: str, pool_id: int, count: int = 10) -> Dict:
-        """进行多次抽奖，默认10次"""
-        error = self._check_registered_or_return(user_id)
-        if error:
-            return error
-            
-        # 验证抽奖次数
-        if count <= 0:
-            return {"success": False, "message": "抽奖次数必须大于0"}
-            
-        # 获取奖池信息
-        pool = self.db.get_gacha_pool_info(pool_id)
-        if not pool:
-            return {"success": False, "message": "抽奖池不存在"}
-            
-        # 检查用户货币是否足够
-        user_currency = self.db.get_user_currency(user_id)
-        total_cost_coins = pool['cost_coins'] * count
-        total_cost_premium = (pool['cost_premium_currency'] or 0) * count
-        
-        if user_currency['coins'] < total_cost_coins or user_currency['premium_currency'] < total_cost_premium:
-            return {"success": False, "message": f"货币不足，需要 {total_cost_coins} 金币和 {total_cost_premium} 高级货币"}
-            
-        # 扣除货币
-        self.db.update_user_currency(user_id, -total_cost_coins, -total_cost_premium)
-        
-        # 进行多次抽奖
+        """执行十连抽卡"""
+        # 获取抽卡池信息
+        pool_info = self.db.get_gacha_pool_info(pool_id)
+        if not pool_info:
+            return {"success": False, "message": "抽卡池不存在"}
+
+        # 检查用户金币是否足够
+        cost = pool_info.get('cost_coins', 0) * count
+        user_coins = self.db.get_user_coins(user_id)
+        if user_coins < cost:
+            return {"success": False, "message": f"金币不足，需要 {cost} 金币"}
+
+        # 扣除金币
+        if not self.db.update_user_coins(user_id, -cost):
+            return {"success": False, "message": "扣除金币失败"}
+
+        # 执行多次抽卡
         results = []
+        rewards_by_rarity = {}
+
         for _ in range(count):
             result = self._perform_single_gacha(user_id, pool_id)
-            if result:
-                results.append(result)
-        
-        # 统计结果
-        rewards_by_rarity = {}
-        for result in results:
-            rarity = result.get('rarity', 1)
+            if not result.get("success"):
+                # 如果抽卡失败，退还金币
+                self.db.update_user_coins(user_id, cost)
+                return result
+
+            item = result.get("item", {})
+            results.append(item)
+
+            # 按稀有度分组
+            rarity = item.get("rarity", 1)
             if rarity not in rewards_by_rarity:
                 rewards_by_rarity[rarity] = []
-            rewards_by_rarity[rarity].append(result)
-        
-        # 构建返回结果
+            rewards_by_rarity[rarity].append(item)
+
         return {
             "success": True,
-            "message": f"成功进行 {count} 次抽奖",
             "results": results,
-            "rewards_by_rarity": rewards_by_rarity,
-            "cost_coins": total_cost_coins,
-            "cost_premium": total_cost_premium
+            "rewards_by_rarity": rewards_by_rarity
         }
     
     def _perform_single_gacha(self, user_id: str, pool_id: int) -> Dict:
-        """执行单次抽奖，不扣除货币（由multi_gacha控制）"""
-        # 获取抽奖池所有物品
+        """执行单次抽卡"""
+        # 获取抽卡池信息
+        pool_info = self.db.get_gacha_pool_info(pool_id)
+        if not pool_info:
+            return {"success": False, "message": "抽卡池不存在"}
+
+        # 检查用户金币是否足够
+        cost = pool_info.get('cost_coins', 0)
+        user_coins = self.db.get_user_coins(user_id)
+        if user_coins < cost:
+            return {"success": False, "message": f"金币不足，需要 {cost} 金币"}
+
+        # 扣除金币
+        if not self.db.update_user_coins(user_id, -cost):
+            return {"success": False, "message": "扣除金币失败"}
+
+        # 获取抽卡池物品列表
         items = self.db.get_gacha_pool_items(pool_id)
         if not items:
-            return None
-            
-        # 计算总权重并随机选择物品
+            return {"success": False, "message": "抽卡池为空"}
+
+        # 计算总权重
         total_weight = sum(item['weight'] for item in items)
-        random_value = random.uniform(0, total_weight)
-        
+        if total_weight <= 0:
+            return {"success": False, "message": "抽卡池配置错误"}
+
+        # 随机抽取物品
+        rand = random.uniform(0, total_weight)
         current_weight = 0
         selected_item = None
+
         for item in items:
             current_weight += item['weight']
-            if random_value <= current_weight:
+            if rand <= current_weight:
                 selected_item = item
                 break
-                
+
         if not selected_item:
-            return None
-            
-        # 添加物品到用户库存
+            return {"success": False, "message": "抽卡失败"}
+
+        # 根据物品类型处理奖励
         item_type = selected_item['item_type']
         item_id = selected_item['item_id']
-        quantity = selected_item['quantity']
-        
-        item_name = ""
-        item_rarity = 1
-        
+        quantity = selected_item.get('quantity', 1)
+
+        # 获取物品详细信息
+        item_info = None
         if item_type == 'rod':
-            self.db.add_rod_to_inventory(user_id, item_id)
-            rod = self.db.get_rod_info(item_id)
-            item_name = rod['name'] if rod else f"鱼竿#{item_id}"
-            item_rarity = rod['rarity'] if rod else 1
+            item_info = self.db.get_rod_info(item_id)
         elif item_type == 'accessory':
-            self.db.add_accessory_to_inventory(user_id, item_id)
-            accessory = self.db.get_accessory_info(item_id)
-            item_name = accessory['name'] if accessory else f"饰品#{item_id}"
-            item_rarity = accessory['rarity'] if accessory else 1
+            item_info = self.db.get_accessory_info(item_id)
         elif item_type == 'bait':
-            self.db.add_bait_to_inventory(user_id, item_id, quantity)
-            bait = self.db.get_bait_info(item_id)
-            item_name = bait['name'] if bait else f"鱼饵#{item_id}"
-            item_rarity = bait['rarity'] if bait else 1
+            item_info = self.db.get_bait_info(item_id)
+
+        if not item_info:
+            return {"success": False, "message": "获取物品信息失败"}
+
+        # 发放奖励
+        success = False
+        if item_type == 'rod':
+            success = self.db.add_rod_to_inventory(user_id, item_id)
+        elif item_type == 'accessory':
+            success = self.db.add_accessory_to_inventory(user_id, item_id)
+        elif item_type == 'bait':
+            success = self.db.add_bait_to_inventory(user_id, item_id, quantity)
         elif item_type == 'coins':
-            self.db.update_user_coins(user_id, quantity)
-            item_name = f"{quantity}金币"
+            success = self.db.update_user_coins(user_id, item_id * quantity)
         elif item_type == 'premium_currency':
-            self.db.update_user_currency(user_id, 0, quantity)
-            item_name = f"{quantity}高级货币"
-        else:
-            item_name = f"未知物品#{item_id}"
-            
+            success = self.db.update_user_currency(user_id, 0, item_id * quantity)
+
+        if not success:
+            # 如果发放失败，退还金币
+            self.db.update_user_coins(user_id, cost)
+            return {"success": False, "message": "发放奖励失败"}
+
+        # 记录抽卡结果
+        self.db.record_gacha_result(
+            user_id=user_id,
+            gacha_pool_id=pool_id,
+            item_type=item_type,
+            item_id=item_id,
+            item_name=item_info.get('name', '未知物品'),
+            quantity=quantity,
+            rarity=item_info.get('rarity', 1)
+        )
+
         return {
-            "type": item_type,
-            "id": item_id,
-            "name": item_name,
-            "quantity": quantity,
-            "rarity": item_rarity
+            "success": True,
+            "item": {
+                "type": item_type,
+                "id": item_id,
+                "name": item_info.get('name', '未知物品'),
+                "quantity": quantity,
+                "rarity": item_info.get('rarity', 1)
+            }
         }
     
     def gacha(self, user_id: str, pool_id: int) -> Dict:

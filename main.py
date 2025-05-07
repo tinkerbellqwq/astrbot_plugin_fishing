@@ -922,6 +922,7 @@ class FishingPlugin(Star):
      - /鱼塘: 查看鱼类背包
      - /鱼饵: 查看鱼饵背包
      - /鱼竿: 查看鱼竿背包
+     - /饰品: 查看饰品背包
     
     🏪 商店与购买:
      - /商店: 查看可购买的物品
@@ -929,6 +930,7 @@ class FishingPlugin(Star):
      - /购买鱼竿 ID: 购买指定ID的鱼竿
      - /使用鱼饵 ID: 使用指定ID的鱼饵
      - /使用鱼竿 ID: 装备指定ID的鱼竿
+     - /使用饰品 ID: 装备指定ID的饰品
     
     💰 出售鱼类:
      - /全部卖出: 出售背包中所有鱼
@@ -938,6 +940,7 @@ class FishingPlugin(Star):
      - /抽卡 ID: 进行单次抽卡
      - /十连 ID: 进行十连抽卡
      - /查看卡池 ID: 查看卡池详细信息和概率
+     - /抽卡记录: 查看抽卡历史记录
     
     🔧 其他功能:
      - /自动钓鱼: 开启/关闭自动钓鱼功能
@@ -1478,6 +1481,142 @@ class FishingPlugin(Star):
         except Exception as e:
             logger.error(f"生成钓鱼赛季总结失败: {e}")
             yield event.plain_result(f"❌ 生成赛季总结时出错，请稍后再试！错误信息：{str(e)}")
+
+    @filter.command("抽卡记录", alias={"gacha_history"})
+    async def show_gacha_history(self, event: AstrMessageEvent):
+        """查看用户的抽卡记录"""
+        user_id = event.get_sender_id()
+
+        # 检查用户是否注册
+        if not self.FishingService.is_registered(user_id):
+            yield event.plain_result("请先注册才能使用此功能")
+            return
+
+        # 获取抽卡记录
+        records = self.FishingService.db.get_user_gacha_records(user_id)
+
+        if not records:
+            yield event.plain_result("📝 你还没有任何抽卡记录，快去抽卡吧！")
+            return
+
+        # 构建消息
+        message = "【🎮 抽卡记录】\n\n"
+
+        for idx, record in enumerate(records, 1):
+            time_str = record.get('timestamp', '未知时间')
+            if isinstance(time_str, str) and len(time_str) > 16:
+                time_str = time_str[:16]  # 简化时间显示
+
+            item_name = record.get('item_name', '未知物品')
+            rarity = record.get('rarity', 1)
+            quantity = record.get('quantity', 1)
+
+            # 稀有度星星显示
+            rarity_stars = '★' * rarity
+
+            # 根据稀有度选择表情
+            rarity_emoji = "✨" if rarity >= 4 else "🌟" if rarity >= 3 else "⭐" if rarity >= 2 else "🔹"
+
+            message += f"{idx}. ⏱️ {time_str}\n"
+            message += f"   {rarity_emoji} {item_name} {rarity_stars}\n"
+            if quantity > 1:
+                message += f"   📦 数量: x{quantity}\n"
+
+        if isinstance(event, AiocqhttpMessageEvent):
+            # 如果是AiocqhttpMessageEvent，使用get_Node函数
+            yield event.chain_result([get_Node(event.get_sender_id(), "抽卡记录", message)])
+        else:
+            yield event.plain_result(message)
+
+    @filter.command("饰品", alias={"accessories"})
+    async def show_accessories(self, event: AstrMessageEvent):
+        """显示用户拥有的饰品"""
+        user_id = event.get_sender_id()
+
+        # 检查用户是否注册
+        if not self.FishingService.is_registered(user_id):
+            yield event.plain_result("请先注册才能使用此功能")
+            return
+
+        # 获取用户饰品
+        accessories = self.FishingService.get_user_accessories(user_id)
+
+        if not accessories.get("success"):
+            yield event.plain_result(accessories.get("message", "获取饰品失败！"))
+            return
+
+        user_accessories = accessories.get("accessories", [])
+
+        if not user_accessories:
+            yield event.plain_result("🎭 你没有任何饰品，可以通过抽卡获得！")
+            return
+
+        # 获取当前装备的饰品
+        equipped = self.FishingService.get_user_equipped_accessory(user_id)
+        equipped_id = equipped.get("accessory", {}).get("accessory_instance_id") if equipped.get("success") else None
+
+        # 构建消息
+        message = "【🎭 饰品背包】\n\n"
+
+        for accessory in user_accessories:
+            accessory_instance_id = accessory.get("accessory_instance_id")
+            is_equipped = accessory_instance_id == equipped_id
+
+            message += f"ID:{accessory_instance_id} - {accessory.get('name')} (稀有度:{'★' * accessory.get('rarity', 1)})"
+            if is_equipped:
+                message += " [已装备]"
+            message += "\n"
+
+            if accessory.get("description"):
+                message += f"  📝 描述: {accessory.get('description')}\n"
+
+            # 显示属性加成
+            if accessory.get("bonus_fish_quality_modifier", 1.0) != 1.0:
+                message += f"  ✨ 品质加成: +{(accessory.get('bonus_fish_quality_modifier', 1.0) - 1) * 100:.0f}%\n"
+            if accessory.get("bonus_fish_quantity_modifier", 1.0) != 1.0:
+                message += f"  📊 数量加成: +{(accessory.get('bonus_fish_quantity_modifier', 1.0) - 1) * 100:.0f}%\n"
+            if accessory.get("bonus_rare_fish_chance", 0.0) > 0:
+                message += f"  🌟 稀有度加成: +{accessory.get('bonus_rare_fish_chance', 0.0) * 100:.0f}%\n"
+            if accessory.get("other_bonus_description"):
+                message += f"  🔮 特殊效果: {accessory.get('other_bonus_description')}\n"
+
+        message += "\n💡 使用「使用饰品 ID」命令装备饰品"
+
+        if isinstance(event, AiocqhttpMessageEvent):
+            # 如果是AiocqhttpMessageEvent，使用get_Node函数
+            yield event.chain_result([get_Node(event.get_sender_id(), "饰品", message)])
+        else:
+            yield event.plain_result(message)
+
+    @filter.command("使用饰品", alias={"useaccessory"})
+    async def use_accessory(self, event: AstrMessageEvent):
+        """装备指定的饰品"""
+        user_id = event.get_sender_id()
+        args = event.message_str.split(' ')
+
+        # 检查用户是否注册
+        if not self.FishingService.is_registered(user_id):
+            yield event.plain_result("请先注册才能使用此功能")
+            return
+
+        if len(args) < 2:
+            yield event.plain_result("⚠️ 请指定要装备的饰品ID")
+            return
+
+        try:
+            accessory_instance_id = int(args[1])
+            result = self.FishingService.equip_accessory(user_id, accessory_instance_id)
+
+            # 增加表情符号
+            original_message = result.get("message", "装备饰品失败！")
+            if "成功" in original_message:
+                message = f"🎭 {original_message}"
+            else:
+                message = f"❌ {original_message}"
+
+            yield event.plain_result(message)
+        except ValueError:
+            yield event.plain_result("⚠️ 请输入有效的饰品ID")
 
     async def terminate(self):
         """插件被卸载/停用时调用"""
