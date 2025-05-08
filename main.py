@@ -576,7 +576,7 @@ class FishingPlugin(Star):
         try:
             pool_id = int(args[1])
             result = self.FishingService.gacha(user_id, pool_id)
-
+            logger.info(f"用户 {user_id} 抽卡结果: {result}")
             if result.get("success"):
                 item = result.get("item", {})
 
@@ -1048,7 +1048,7 @@ class FishingPlugin(Star):
             # 替换普通文本消息为带表情的消息
             original_message = result.get("message", "擦弹失败，请稍后再试")
 
-            if "成功" in original_message:
+            if result.get("success"):
                 # 尝试从结果中提取倍数和奖励
                 multiplier = result.get("multiplier", 0)
                 reward = result.get("reward", 0)
@@ -1238,7 +1238,7 @@ class FishingPlugin(Star):
             message = "【🏅 成就进度】\n\n"
 
             if completed:
-                message += "✅ 已完成但未领取奖励的成就:\n"
+                message += "✅ 已完成的成就:\n"
                 for ach in completed:
                     message += f"- {ach['name']}: {ach['description']}\n"
                     reward_text = f"{ach['reward_type']} (ID: {ach['reward_value']})"

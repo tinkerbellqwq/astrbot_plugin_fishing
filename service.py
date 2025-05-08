@@ -607,14 +607,6 @@ class FishingService:
         if not bait_info:
             return {"success": False, "message": "鱼饵不存在"}
         
-        # 检查用户是否已有正在使用的鱼饵
-        current_bait = self.db.get_user_current_bait(user_id)
-        if current_bait:
-            remaining_text = ""
-            if current_bait.get('duration_minutes', 0) > 0:
-                remaining_text = f"，剩余时间：{int(current_bait.get('remaining_minutes', 0))}分钟"
-            return {"success": False, "message": f"你已经在使用【{current_bait['name']}】{remaining_text}，请等待当前鱼饵效果结束或使用完毕"}
-        
         # 设置用户当前鱼饵
         success = self.db.set_user_current_bait(user_id, bait_id)
         if not success:
@@ -726,10 +718,6 @@ class FishingService:
         if user_coins < cost:
             return {"success": False, "message": f"金币不足，需要 {cost} 金币"}
 
-        # 扣除金币
-        if not self.db.update_user_coins(user_id, -cost):
-            return {"success": False, "message": "扣除金币失败"}
-
         # 获取抽卡池物品列表
         items = self.db.get_gacha_pool_items(pool_id)
         if not items:
@@ -745,6 +733,9 @@ class FishingService:
         current_weight = 0
         selected_item = None
 
+        # 将物品随机打乱
+        items = random.sample(items, len(items))
+
         for item in items:
             current_weight += item['weight']
             if rand <= current_weight:
@@ -753,6 +744,9 @@ class FishingService:
 
         if not selected_item:
             return {"success": False, "message": "抽卡失败"}
+        # 扣除金币
+        if not self.db.update_user_coins(user_id, -cost):
+            return {"success": False, "message": "扣除金币失败"}
 
         # 根据物品类型处理奖励
         item_type = selected_item['item_type']
@@ -767,6 +761,9 @@ class FishingService:
             item_info = self.db.get_accessory_info(item_id)
         elif item_type == 'bait':
             item_info = self.db.get_bait_info(item_id)
+        elif item_type == 'coins':
+            item_info = {'name': '金币', 'rarity': 1}
+
 
         if not item_info:
             return {"success": False, "message": "获取物品信息失败"}
@@ -780,7 +777,7 @@ class FishingService:
         elif item_type == 'bait':
             success = self.db.add_bait_to_inventory(user_id, item_id, quantity)
         elif item_type == 'coins':
-            success = self.db.update_user_coins(user_id, item_id * quantity)
+            success = self.db.update_user_coins(user_id, quantity)
         elif item_type == 'premium_currency':
             success = self.db.update_user_currency(user_id, 0, item_id * quantity)
 
@@ -832,8 +829,9 @@ class FishingService:
         
         # 执行抽奖
         result = self._perform_single_gacha(user_id, pool_id)
+        self.LOG.info(f"======= 抽奖结果: {result} =======")
         if not result.get('success'):
-            return {"success": False, "message": "抽奖失败，请稍后再试"}
+            return {"success": False, "message": result.get("message")}
             
         # 将物品信息添加到rewards_by_rarity中，便于前端显示
         rewards_by_rarity = {}
@@ -1113,15 +1111,16 @@ class FishingService:
             }
 
     def check_wipe_bomb_available(self, user_id: str) -> bool:
-        """检查用户今天是否已经进行过擦弹"""
+        """检查用户今天是否已经进行了3次擦弹"""
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             today = date.today().isoformat()
             cursor.execute("""
-                SELECT 1 FROM wipe_bomb_log
+                SELECT COUNT(*) as count FROM wipe_bomb_log
                 WHERE user_id = ? AND DATE(timestamp) = ?
             """, (user_id, today))
-            return cursor.fetchone() is None  # 如果为None，表示今天还没有进行过擦弹
+            result = cursor.fetchone()
+            return result['count'] < 3  # 如果次数小于3，表示今天还可以进行擦弹
 
     def perform_wipe_bomb(self, user_id: str, contribution_amount: int) -> Dict:
         """执行擦弹操作，向公共奖池投入金币并获得随机倍数的奖励"""
@@ -1130,8 +1129,17 @@ class FishingService:
             return error
             
         # 检查是否已经进行过擦弹
-        if not self.check_wipe_bomb_available(user_id):
-            return {"success": False, "message": "你今天已经进行过擦弹，明天再来吧！"}
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            today = date.today().isoformat()
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM wipe_bomb_log
+                WHERE user_id = ? AND DATE(timestamp) = ?
+            """, (user_id, today))
+            result = cursor.fetchone()
+            count = result['count']
+            if count >= 3:
+                return {"success": False, "message": "你今天已经使用了3次擦弹，明天再来吧！"}
             
         # 验证投入金额
         if contribution_amount <= 0:
@@ -1194,16 +1202,18 @@ class FishingService:
         # 构建返回消息
         profit = reward_amount - contribution_amount
         profit_text = f"盈利 {profit}" if profit > 0 else f"亏损 {-profit}"
+        remaining = 2 - count  # 计算剩余次数
         
         return {
             "success": True,
-            "message": f"擦弹结果：投入 {contribution_amount} 金币，获得 {reward_multiplier}倍 奖励，共 {reward_amount} 金币，{profit_text}！",
+            "message": f"擦弹结果：投入 {contribution_amount} 金币，获得 {reward_multiplier}倍 奖励，共 {reward_amount} 金币，{profit_text}！今天还可以擦弹 {remaining} 次。",
             "contribution": contribution_amount,
             "multiplier": reward_multiplier,
             "reward": reward_amount,
-            "profit": profit
+            "profit": profit,
+            "remaining_today": remaining
         }
-        
+
     def get_wipe_bomb_history(self, user_id: str, limit: int = 10) -> Dict:
         """获取用户的擦弹历史记录"""
         error = self._check_registered_or_return(user_id)
@@ -1212,6 +1222,7 @@ class FishingService:
             
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
+            # 获取历史记录
             cursor.execute("""
                 SELECT contribution_amount, reward_multiplier, reward_amount, timestamp
                 FROM wipe_bomb_log
@@ -1226,11 +1237,23 @@ class FishingService:
                 # 计算盈利
                 record['profit'] = record['reward_amount'] - record['contribution_amount']
                 records.append(record)
+            
+            # 获取今天的擦弹次数
+            today = date.today().isoformat()
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM wipe_bomb_log
+                WHERE user_id = ? AND DATE(timestamp) = ?
+            """, (user_id, today))
+            result = cursor.fetchone()
+            count = result['count']
+            remaining = 3 - count
                 
             return {
                 "success": True,
                 "records": records,
-                "available_today": self.check_wipe_bomb_available(user_id)
+                "count_today": count,
+                "remaining_today": remaining,
+                "available_today": remaining > 0
             }
 
     def get_user_equipment(self, user_id: str) -> Dict:
