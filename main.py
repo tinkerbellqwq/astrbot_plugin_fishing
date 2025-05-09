@@ -19,8 +19,8 @@ def get_Node(user_id: str, name: str, message: str) -> Node:
     return Node(uin=user_id, name=name, content=[Plain(message)])
 
 
-@register("fishing", "Your Name", "一个功能齐全的钓鱼系统插件", "1.0.0",
-          "https://github.com/yourusername/astrbot_plugin_fishing")
+@register("fish2.0", "tinker", "升级版的钓鱼插件", "1.0.0",
+          "https://github.com/tinkerbellqwq/astrbot_plugin_fishing")
 class FishingPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
