@@ -1090,7 +1090,7 @@ class FishingPlugin(Star):
         except ValueError:
             yield event.plain_result("⚠️ 请输入有效的金币数量")
 
-    @filter.command("擦弹历史", alias={"wipe_history"})
+    @filter.command("擦弹历史", alias={"wipe_history", "擦弹记录"})
     async def show_wipe_history(self, event: AstrMessageEvent):
         """显示用户的擦弹历史记录"""
         user_id = event.get_sender_id()
@@ -1379,116 +1379,6 @@ class FishingPlugin(Star):
         except Exception as e:
             logger.error(f"获取用户列表失败: {e}")
             yield event.plain_result(f"❌ 获取用户列表时出错，请稍后再试！错误信息：{str(e)}")
-
-    @filter.command("钓鱼赛季总结")
-    async def fishing_season_summary(self, event: AstrMessageEvent):
-        """查看钓鱼赛季总结"""
-        user_id = event.get_sender_id()
-
-        try:
-            # 从 user_stats_20250506.csv 中读取数据
-            df = pd.read_csv("data/plugins/astrbot_plugin_fishing/user_stats_20250506.csv")
-
-            # 将用户ID转换为字符串以确保匹配
-            df['用户ID'] = df['用户ID'].astype(str)
-            user_id_str = str(user_id)
-
-            # 过滤出当前用户的数据
-            user_data = df[df['用户ID'] == user_id_str]
-
-            if user_data.empty:
-                yield event.plain_result("没有找到你的钓鱼赛季数据")
-                return
-
-            # 提取数据
-            total_check_in = user_data['签到天数'].values[0]
-            coins = user_data['金币数'].values[0]
-            lottery_counts = user_data['抽奖次数'].values[0]
-            lottery_coins = user_data['抽奖总金额'].values[0]
-
-            # 计算排名
-            total_users = len(df)
-            coins_rank = df[df['金币数'] >= coins].shape[0]
-            check_in_rank = df[df['签到天数'] >= total_check_in].shape[0]
-            lottery_count_rank = df[df['抽奖次数'] >= lottery_counts].shape[0]
-            lottery_coins_rank = df[df['抽奖总金额'] >= lottery_coins].shape[0]
-
-            # 计算每个指标的百分位
-            coins_percentile = (total_users - coins_rank + 1) / total_users * 100
-            checkin_percentile = (total_users - check_in_rank + 1) / total_users * 100
-            lottery_count_percentile = (total_users - lottery_count_rank + 1) / total_users * 100
-            lottery_coins_percentile = (total_users - lottery_coins_rank + 1) / total_users * 100
-
-            # 构建消息
-            message = f"【🏆 钓鱼赛季总结】\n\n"
-            message += f"🎉 你在本赛季的表现如下：\n"
-
-            # 签到天数评价
-            message += f"📅 签到天数: {total_check_in}天 (排名: {check_in_rank}/{total_users})\n"
-            if checkin_percentile >= 90:
-                message += f"   🌟 你的签到非常勤奋，超过了{checkin_percentile:.1f}%的玩家！\n"
-            elif checkin_percentile >= 70:
-                message += f"   ✨ 你的签到相当稳定，超过了{checkin_percentile:.1f}%的玩家。\n"
-            elif checkin_percentile >= 50:
-                message += f"   👍 你的签到尚可，继续保持！\n"
-            else:
-                message += f"   💡 要记得每天签到哦，这样可以获得更多金币。\n"
-
-            # 金币评价
-            message += f"💰 总金币数: {coins}金币 (排名: {coins_rank}/{total_users})\n"
-            if coins_percentile >= 90:
-                message += f"   💎 你是钓鱼大富翁，财富超过了{coins_percentile:.1f}%的玩家！\n"
-            elif coins_percentile >= 70:
-                message += f"   🏅 你的财富相当可观，超过了{coins_percentile:.1f}%的玩家。\n"
-            elif coins_percentile >= 50:
-                message += f"   👍 你的金币数量处于中上水平。\n"
-            else:
-                message += f"   💪 继续努力钓鱼和参与活动，可以积累更多金币。\n"
-
-            # 抽奖次数评价
-            message += f"🎲 抽奖次数: {int(lottery_counts)}次 (排名: {lottery_count_rank}/{total_users})\n"
-            if lottery_count_percentile >= 90:
-                message += f"   🎯 你是抽奖狂热者，抽奖次数超过了{lottery_count_percentile:.1f}%的玩家！\n"
-            elif lottery_count_percentile >= 70:
-                message += f"   🎪 你很喜欢抽奖，次数超过了{lottery_count_percentile:.1f}%的玩家。\n"
-            elif lottery_count_percentile >= 50:
-                message += f"   👍 你对抽奖有一定的兴趣。\n"
-            else:
-                message += f"   💡 多参与抽奖，也许会有意外收获哦！\n"
-
-            # 抽奖总金币评价
-            message += f"💸 抽奖总金币: {int(lottery_coins)}金币 (排名: {lottery_coins_rank}/{total_users})\n"
-            if lottery_coins_percentile >= 90:
-                message += f"   🌈 你的抽奖运气非常好，收益超过了{lottery_coins_percentile:.1f}%的玩家！\n"
-            elif lottery_coins_percentile >= 70:
-                message += f"   🍀 你的抽奖运气不错，收益超过了{lottery_coins_percentile:.1f}%的玩家。\n"
-            elif lottery_coins_percentile >= 50:
-                message += f"   👍 你的抽奖收益处于中上水平。\n"
-            else:
-                message += f"   🎯 运气有起伏，下次抽奖也许会有更好的收获！\n"
-
-            # 总体评价
-            message += "\n【🏆 总体评价】\n"
-            avg_percentile = (
-                                         coins_percentile + checkin_percentile + lottery_count_percentile + lottery_coins_percentile) / 4
-
-            if avg_percentile >= 90:
-                message += "你是本赛季的顶尖玩家，在各方面都表现出色，继续保持这样的水平！"
-            elif avg_percentile >= 70:
-                message += "你在本赛季表现优秀，是资深的钓鱼玩家，相信下个赛季会更好！"
-            elif avg_percentile >= 50:
-                message += "你在本赛季表现不错，继续努力可以更上一层楼！"
-            else:
-                message += "感谢你参与本赛季活动，希望在下个赛季看到你的进步！"
-
-            if isinstance(event, AiocqhttpMessageEvent):
-                # 如果是AiocqhttpMessageEvent，使用get_Node函数
-                yield event.chain_result([get_Node(event.get_sender_id(), "钓鱼赛季总结", message)])
-            else:
-                yield event.plain_result(message)
-        except Exception as e:
-            logger.error(f"生成钓鱼赛季总结失败: {e}")
-            yield event.plain_result(f"❌ 生成赛季总结时出错，请稍后再试！错误信息：{str(e)}")
 
     @filter.command("抽卡记录", alias={"gacha_history"})
     async def show_gacha_history(self, event: AstrMessageEvent):

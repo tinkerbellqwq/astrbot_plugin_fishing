@@ -675,10 +675,6 @@ class FishingService:
         if user_coins < cost:
             return {"success": False, "message": f"金币不足，需要 {cost} 金币"}
 
-        # 扣除金币
-        if not self.db.update_user_coins(user_id, -cost):
-            return {"success": False, "message": "扣除金币失败"}
-
         # 执行多次抽卡
         results = []
         rewards_by_rarity = {}
@@ -821,11 +817,8 @@ class FishingService:
             
         # 检查用户货币是否足够
         user_currency = self.db.get_user_currency(user_id)
-        if user_currency['coins'] < pool['cost_coins'] or user_currency['premium_currency'] < pool['cost_premium_currency']:
+        if user_currency['coins'] < pool['cost_coins']:
             return {"success": False, "message": "货币不足，无法抽奖"}
-            
-        # 扣除货币
-        self.db.update_user_currency(user_id, -pool['cost_coins'], -pool['cost_premium_currency'])
         
         # 执行抽奖
         result = self._perform_single_gacha(user_id, pool_id)
