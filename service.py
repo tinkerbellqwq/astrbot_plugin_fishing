@@ -885,8 +885,13 @@ class FishingService:
                             # 检查CD时间
                             current_time = time.time()
                             last_time = self.db.get_last_fishing_time(user_id)
-                            
-                            if current_time - last_time < 300:  # 5分钟CD
+
+                            # 检查用户是否装备了海洋之心
+                            equipped_accessory = self.db.get_user_equipped_accessory(user_id)
+                            if equipped_accessory and equipped_accessory.get('name') == "海洋之心":
+                                # 海洋之心效果：减少CD时间
+                                last_time -= 120  # 减少2分钟CD
+                            if current_time - last_time < 180:  # 3分钟CD
                                 self.LOG.debug(f"用户 {user_id} 钓鱼CD中，跳过")
                                 continue
                                 
@@ -913,8 +918,8 @@ class FishingService:
                         except Exception as e:
                             self.LOG.error(f"用户 {user_id} 自动钓鱼出错: {e}")
                 
-                # 每分钟检查一次
-                time.sleep(60)
+                # 每40s检查一次
+                time.sleep(40)
                 
             except Exception as e:
                 self.LOG.error(f"自动钓鱼任务出错: {e}", exc_info=True)
