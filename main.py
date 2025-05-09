@@ -54,6 +54,11 @@ class FishingPlugin(Star):
         # 检查CD时间
         last_fishing_time = self.FishingService.db.get_last_fishing_time(user_id)
         current_time = time.time()
+        # 查看用户是否装备了海洋之心
+        equipped_rod = self.FishingService.db.get_user_equipped_accessories(user_id)
+        if equipped_rod and equipped_rod.get("name") == "海洋之心":
+            # 如果装备了海洋之心，CD时间减少到1分钟
+            last_fishing_time = max(0, last_fishing_time - 120)
         # logger.info(f"用户 {user_id} 上次钓鱼时间: {last_fishing_time}, 当前时间: {current_time}")
         # 3分钟CD (180秒)
         if last_fishing_time > 0 and current_time - last_fishing_time < 180:
@@ -916,7 +921,7 @@ class FishingPlugin(Star):
         message = """【🎣 钓鱼系统帮助】
     📋 基础命令:
      - /注册: 注册钓鱼用户
-     - /钓鱼: 进行一次钓鱼(消耗10金币，5分钟CD)
+     - /钓鱼: 进行一次钓鱼(消耗10金币，3分钟CD)
      - /签到: 每日签到领取奖励
      - /金币: 查看当前金币
     
@@ -948,13 +953,14 @@ class FishingPlugin(Star):
      - /自动钓鱼: 开启/关闭自动钓鱼功能
      - /排行榜: 查看钓鱼排行榜
      - /鱼类图鉴: 查看所有鱼的详细信息
-     - /擦弹 [金币数]: 向公共奖池投入金币，获得随机倍数回报
+     - /擦弹 [金币数]: 向公共奖池投入金币，获得随机倍数回报（0-10倍）
      - /擦弹历史： 查看擦弹历史记录
      - /查看称号: 查看已获得的称号
      - /查看成就: 查看可达成的成就
      - /钓鱼记录: 查看最近的钓鱼记录
     """
-        message = prefix + "\n" + message
+        # message = prefix + "\n" + message
+
         if isinstance(event, AiocqhttpMessageEvent):
             # 如果是AiocqhttpMessageEvent，使用get_Node函数
             yield event.chain_result([get_Node(event.get_sender_id(), "钓鱼帮助", message)])

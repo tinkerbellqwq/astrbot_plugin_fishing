@@ -1959,6 +1959,25 @@ class FishingDB:
             logger.error(f"调整奖池权重失败: {e}")
             return False
 
+    def get_user_equipped_accessories(self, user_id: str) -> Dict:
+        """获取用户当前装备的饰品信息"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # 只用user_accessories表和accessories表
+                cursor.execute("""
+                    SELECT a.*, ua.accessory_instance_id
+                    FROM user_accessories ua
+                    JOIN accessories a ON ua.accessory_id = a.accessory_id
+                    WHERE ua.user_id = ? AND ua.is_equipped = 1
+                """, (user_id,))
+                result = cursor.fetchone()
+                return dict(result) if result else None
+        except sqlite3.Error as e:
+            logger.error(f"获取用户装备饰品失败: {e}")
+            return {}
+
+
     def get_leaderboard(self, limit: int = 10) -> List[Dict]:
         """获取用户排行榜数据
 
