@@ -236,7 +236,7 @@ class FishingService:
                 zone.rare_fish_caught_today += 1
                 self.inventory_repo.update_fishing_zone(zone)
         # 5. 更新数据库
-        self.inventory_repo.add_fish_to_inventory(user.user_id, fish_template.fish_id)
+        self.inventory_repo.add_fish_to_inventory(user.user_id, fish_template.fish_id, quality_modifier)
 
         # 更新用户统计数据
         user.total_fishing_count += 1
