@@ -1,4 +1,4 @@
-![:astrbot_plugin_fish](https://count.getloli.com/@:astrbot_plugin_fish?theme=capoo-1)
+![:astrbot_plugin_fish](https://count.getloli.com/@:astrbot_plugin_fish?theme=)
 
 # AstrBot 钓鱼插件
 
@@ -6,7 +6,7 @@
 
 # 🐔 通知
 > [!CAUTION]\
-> 作者学业繁重，暂无力维护和更新本插件。
+> 作者停止维护和更新本插件。可以关注`https://github.com/xxlemon-io/astrbot_plugin_fishing`此仓库作为后续的更新。
 
 
 
